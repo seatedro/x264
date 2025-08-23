@@ -43,7 +43,7 @@ pub fn build(b: *std.Build) void {
         .style = .blank,
         .include_path = "config.h",
     }, .{
-        .HAVE_MALLOC_H = t.os.tag == .linux or t.os.tag == .windows,
+        .HAVE_MALLOC_H = t.os.tag == .linux,
         .HAVE_X86_INLINE_ASM = arch_config.x86 and enable_assembly,
         .HAVE_MMX = arch_config.x86 and enable_assembly,
         .ARCH_X86_64 = arch_config.x64,
@@ -205,7 +205,7 @@ pub fn build(b: *std.Build) void {
 
     // Arch specific
     if (arch_config.x86) {
-        addX86Sources(b, lib, &arch_config, t, enable_assembly, &compile_flags_8, &compile_flags_10);
+        addX86Sources(b, lib, &arch_config, t, optimize, enable_assembly, &compile_flags_8, &compile_flags_10);
     } else if (arch_config.arm) {
         addArmSources(b, lib, &arch_config, enable_assembly, &compile_flags_8, &compile_flags_10);
     } else if (arch_config.arm64) {
@@ -285,6 +285,7 @@ fn addX86Sources(
     lib: *std.Build.Step.Compile,
     arch_config: *const ArchConfig,
     t: std.Target,
+    o: std.builtin.OptimizeMode,
     enable_assembly: bool,
     compile_flags_8: *const std.ArrayList([]const u8),
     compile_flags_10: *const std.ArrayList([]const u8),
@@ -303,11 +304,20 @@ fn addX86Sources(
         const nasm_dep = b.dependency("nasm", .{ .optimize = .ReleaseFast });
         const nasm_exe = nasm_dep.artifact("nasm");
 
-        // CPU detection assembly (bit depth independent)
         const run = b.addRunArtifact(nasm_exe);
         var args = std.ArrayList([]const u8).init(b.allocator);
         defer args.deinit();
-        args.appendSlice(&.{ "-f", if (t.os.tag == .windows) "win64" else "elf64", "-g", "-F", "dwarf", "-I./", "-Icommon/x86/" }) catch @panic("oom");
+        args.appendSlice(&.{ "-f", if (t.os.tag == .windows) "win64" else "elf64", "-I./", "-Icommon/x86/" }) catch @panic("oom");
+        if (o == .Debug) {
+            if (t.os.tag != .windows and t.os.tag != .linux) @panic("Debug symbols only supported on windows and linux");
+            const debug_format: []const u8 = switch (t.os.tag) {
+                .macos => "macho",
+                .linux => "dwarf",
+                .windows => "cv8",
+                else => unreachable
+            };
+            args.appendSlice(&.{ "-g", "-F", debug_format }) catch @panic("oom");
+        }
         if (arch_config.x64) {
             args.appendSlice(&.{"-DARCH_X86_64=1"}) catch @panic("oom");
         } else {
@@ -336,22 +346,22 @@ fn addX86Sources(
         const asm_x86_64_only = [_][]const u8{ "common/x86/dct-64.asm", "common/x86/trellis-64.asm" };
 
         for (asm_files) |p| {
-            addNasmObject(b, nasm_exe, lib, p, true, t.os.tag == .windows, arch_config.x64);
-            addNasmObject(b, nasm_exe, lib, p, false, t.os.tag == .windows, arch_config.x64);
+            addNasmObject(b, t, o, nasm_exe, lib, p, true, t.os.tag == .windows, arch_config.x64);
+            addNasmObject(b, t, o, nasm_exe, lib, p, false, t.os.tag == .windows, arch_config.x64);
         }
 
         if (!arch_config.x64) {
             for (asm_x86_only) |p| {
-                addNasmObject(b, nasm_exe, lib, p, true, t.os.tag == .windows, false);
+                addNasmObject(b, t, o, nasm_exe, lib, p, true, t.os.tag == .windows, false);
             }
         } else {
             for (asm_x86_64_only) |p| {
-                addNasmObject(b, nasm_exe, lib, p, true, t.os.tag == .windows, true);
+                addNasmObject(b, t, o, nasm_exe, lib, p, true, t.os.tag == .windows, true);
             }
         }
 
-        addNasmObject(b, nasm_exe, lib, "common/x86/sad-a.asm", true, t.os.tag == .windows, arch_config.x64);
-        addNasmObject(b, nasm_exe, lib, "common/x86/sad16-a.asm", false, t.os.tag == .windows, arch_config.x64);
+        addNasmObject(b, t, o, nasm_exe, lib, "common/x86/sad-a.asm", true, t.os.tag == .windows, arch_config.x64);
+        addNasmObject(b, t, o, nasm_exe, lib, "common/x86/sad16-a.asm", false, t.os.tag == .windows, arch_config.x64);
     }
 }
 
@@ -653,6 +663,8 @@ fn buildCli(
 
 fn addNasmObject(
     b: *std.Build,
+    t: std.Target,
+    o: std.builtin.OptimizeMode,
     nasm_exe: *std.Build.Step.Compile,
     lib: *std.Build.Step.Compile,
     input: []const u8,
@@ -662,7 +674,17 @@ fn addNasmObject(
 ) void {
     const run = b.addRunArtifact(nasm_exe);
     run.addArgs(&.{ "-f", if (is_windows) "win64" else "elf64" });
-    run.addArgs(&.{ "-g", "-F", "dwarf", "-I./", "-Icommon/x86/" });
+    if (o == .Debug) {
+        if (t.os.tag != .windows and t.os.tag != .linux) @panic("Debug symbols only supported on windows and linux");
+        const debug_format: []const u8 = switch (t.os.tag) {
+            .macos => "macho",
+            .linux => "dwarf",
+            .windows => "cv8",
+            else => unreachable
+        };
+        run.addArgs(&.{ "-g", "-F", debug_format });
+    }
+    run.addArgs(&.{ "-I./", "-Icommon/x86/" });
     if (is_x86_64) {
         run.addArgs(&.{"-DARCH_X86_64=1"});
     } else {
