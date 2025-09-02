@@ -314,7 +314,7 @@ fn addX86Sources(
                 .macos => "macho",
                 .linux => "dwarf",
                 .windows => "cv8",
-                else => unreachable
+                else => unreachable,
             };
             args.appendSlice(&.{ "-g", "-F", debug_format }) catch @panic("oom");
         }
@@ -357,6 +357,7 @@ fn addX86Sources(
         } else {
             for (asm_x86_64_only) |p| {
                 addNasmObject(b, t, o, nasm_exe, lib, p, true, t.os.tag == .windows, true);
+                addNasmObject(b, t, o, nasm_exe, lib, p, false, t.os.tag == .windows, true);
             }
         }
 
@@ -680,7 +681,7 @@ fn addNasmObject(
             .macos => "macho",
             .linux => "dwarf",
             .windows => "cv8",
-            else => unreachable
+            else => unreachable,
         };
         run.addArgs(&.{ "-g", "-F", debug_format });
     }
