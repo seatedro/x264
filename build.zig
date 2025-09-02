@@ -37,7 +37,7 @@ pub fn build(b: *std.Build) void {
     lib.linkLibC();
     lib.addIncludePath(b.path("."));
 
-    const stack_alignment: u32 = if (arch_config.x86) @as(u32, 16) else @as(u32, 64);
+    const stack_alignment: u32 = if (arch_config.x64) @as(u32, 64) else @as(u32, 16);
 
     const config_h = b.addConfigHeader(.{
         .style = .blank,
